@@ -1,10 +1,14 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template_string
 from flask_cors import CORS
 from telebot import TeleBot, types
 import hashlib, json, os, threading
 
+# CONFIG
 API_TOKEN = os.environ.get("API_TOKEN")
 DOMAIN = "https://verification-beta-five.vercel.app"
+
+ADMIN_PASSWORD = "admin123"
+RESET_KEY = "MY_SECRET_123"
 
 if not API_TOKEN:
     print("❌ API_TOKEN missing")
@@ -17,31 +21,34 @@ app = Flask(__name__)
 CORS(app)
 
 # FILES
-DB_FILE = "devices.json"
-USER_FILE = "users.json"
-FAILED_FILE = "failed.json"
-IP_FILE = "ips.json"
+FILES = {
+    "devices": "devices.json",
+    "users": "users.json",
+    "failed": "failed.json",
+    "ips": "ips.json",
+    "refs": "referrals.json"
+}
 
 # create files
-for file in [DB_FILE, USER_FILE, FAILED_FILE, IP_FILE]:
-    if not os.path.exists(file):
-        with open(file, "w") as f:
-            json.dump({}, f)
+for f in FILES.values():
+    if not os.path.exists(f):
+        with open(f, "w") as file:
+            json.dump({}, file)
 
 # load data
-devices = json.load(open(DB_FILE))
-users = json.load(open(USER_FILE))
-failed = json.load(open(FAILED_FILE))
-ips = json.load(open(IP_FILE))
+devices = json.load(open(FILES["devices"]))
+users = json.load(open(FILES["users"]))
+failed = json.load(open(FILES["failed"]))
+ips = json.load(open(FILES["ips"]))
+referrals = json.load(open(FILES["refs"]))
 
-def save(file, data):
-    with open(file, "w") as f:
+def save(name, data):
+    with open(FILES[name], "w") as f:
         json.dump(data, f)
 
 def make_hash(data):
     return hashlib.md5(data.encode()).hexdigest()
 
-# GET REAL IP
 def get_ip(req):
     if req.headers.get("X-Forwarded-For"):
         return req.headers.get("X-Forwarded-For").split(",")[0]
@@ -56,15 +63,28 @@ def home():
 @bot.message_handler(commands=['start'])
 def start(msg):
     user_id = str(msg.chat.id)
+    args = msg.text.split()
 
+    # 🎯 REFERRAL
+    if len(args) > 1:
+        ref = args[1]
+        if ref != user_id and user_id not in referrals:
+            referrals[user_id] = ref
+            referrals[ref + "_count"] = referrals.get(ref + "_count", 0) + 1
+            save("refs", referrals)
+            bot.send_message(ref, "🎉 New referral joined!")
+
+    # ✅ VERIFIED
     if user_id in users:
         bot.send_message(msg.chat.id, "✅ You are already verified!")
         return
 
+    # ❌ FAILED
     if user_id in failed:
         bot.send_message(msg.chat.id, "⚠️ Device/IP already used.\nYou can still use bot.")
         return
 
+    # 🆕 NEW
     markup = types.InlineKeyboardMarkup()
     btn = types.InlineKeyboardButton(
         "🔐 Verify Device",
@@ -74,7 +94,19 @@ def start(msg):
 
     bot.send_message(msg.chat.id, "🛡 Please verify your device", reply_markup=markup)
 
-# VERIFY
+# REF COMMAND
+@bot.message_handler(commands=['ref'])
+def ref(msg):
+    user_id = str(msg.chat.id)
+    count = referrals.get(user_id + "_count", 0)
+    link = f"https://t.me/TestingOnTop_bot?start={user_id}"
+
+    bot.send_message(
+        msg.chat.id,
+        f"👥 Referrals: {count}\n\n🔗 Link:\n{link}"
+    )
+
+# VERIFY API
 @app.route("/verify", methods=["POST"])
 def verify():
     try:
@@ -86,59 +118,98 @@ def verify():
             return jsonify({"status": "error"})
 
         device_id = make_hash(device)
-        user_ip = get_ip(request)
+        ip = get_ip(request)
 
-        print(f"USER: {user_id} | DEVICE: {device_id} | IP: {user_ip}")
+        print(user_id, device_id, ip)
 
-        # ❌ DEVICE CHECK
+        # ❌ DEVICE USED
         if device_id in devices:
             failed[user_id] = True
-            save(FAILED_FILE, failed)
+            save("failed", failed)
 
-            bot.send_message(
-                user_id,
-                "⚠️ Device already used.\nYou can still use bot."
-            )
-
+            bot.send_message(user_id, "⚠️ Device already used.\nYou can still use bot.")
             return jsonify({"status": "failed"})
 
-        # ❌ IP CHECK
-        if user_ip in ips:
+        # ❌ IP USED
+        if ip in ips:
             failed[user_id] = True
-            save(FAILED_FILE, failed)
+            save("failed", failed)
 
-            bot.send_message(
-                user_id,
-                "⚠️ Multiple accounts detected on same network.\nYou can still use bot."
-            )
-
+            bot.send_message(user_id, "⚠️ Multiple accounts detected.\nYou can still use bot.")
             return jsonify({"status": "failed"})
 
         # ✅ SUCCESS
         devices[device_id] = user_id
-        save(DB_FILE, devices)
+        save("devices", devices)
 
-        ips[user_ip] = user_id
-        save(IP_FILE, ips)
+        ips[ip] = user_id
+        save("ips", ips)
 
         users[user_id] = True
-        save(USER_FILE, users)
+        save("users", users)
 
-        bot.send_message(
-            user_id,
-            "✅ Verified Successfully!\n🎉 Full access unlocked."
-        )
-
+        bot.send_message(user_id, "✅ Verified Successfully!\n🎉 Full access unlocked.")
         return jsonify({"status": "success"})
 
     except Exception as e:
-        print("ERROR:", e)
+        print(e)
         return jsonify({"status": "error"})
+
+# 🔐 RESET (SECRET URL)
+@app.route("/reset-data")
+def reset():
+    key = request.args.get("key")
+
+    if key != RESET_KEY:
+        return "❌ Access Denied"
+
+    for f in FILES.values():
+        with open(f, "w") as file:
+            json.dump({}, file)
+
+    return "✅ All data reset"
+
+# 🎛️ ADMIN PANEL
+@app.route("/admin")
+def admin():
+    password = request.args.get("pass")
+
+    if password != ADMIN_PASSWORD:
+        return "❌ Access Denied"
+
+    total_users = len(users)
+    verified = len(users)
+    failed_users = len(failed)
+    total_ips = len(ips)
+    total_devices = len(devices)
+    total_refs = sum([v for k, v in referrals.items() if "_count" in k])
+
+    return render_template_string(f"""
+    <html>
+    <body style="background:#0a0f1c;color:white;text-align:center;font-family:Arial;">
+    <h1>⚙️ Admin Panel</h1>
+
+    <p>👥 Users: {total_users}</p>
+    <p>✅ Verified: {verified}</p>
+    <p>❌ Failed: {failed_users}</p>
+    <p>🌍 IPs: {total_ips}</p>
+    <p>📱 Devices: {total_devices}</p>
+    <p>💰 Referrals: {total_refs}</p>
+
+    <br>
+    <a href="/reset-data?key={RESET_KEY}">
+    <button style="padding:10px;background:red;color:white;">RESET</button>
+    </a>
+
+    </body>
+    </html>
+    """)
 
 # RUN BOT
 def run_bot():
     print("🤖 Bot Started")
-    bot.infinity_polling()
+    bot.remove_webhook()
+    bot.infinity_polling(timeout=30, long_polling_timeout=30)
 
 threading.Thread(target=run_bot).start()
 
