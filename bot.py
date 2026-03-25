@@ -1,11 +1,13 @@
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 from telebot import TeleBot, types
 import hashlib, json, os, threading
 
 # CONFIG
 API_TOKEN = os.environ.get("API_TOKEN")
-DOMAIN = "https://verification-beta-five.vercel.app"  # Replace with your domain
+DOMAIN = "https://verification-beta-five.vercel.app"  # replace your webapp
+BOT_USERNAME = "TestingOnTop_bot"
+CHANNEL_URL = "https://t.me/FASTLIFAFAOFFICIAL"
 
 ADMIN_PASSWORD = "admin123"
 RESET_KEY = "MY_SECRET_123"
@@ -26,10 +28,12 @@ FILES = {
     "users": "users.json",
     "failed": "failed.json",
     "ips": "ips.json",
-    "refs": "referrals.json"
+    "refs": "referrals.json",
+    "settings": "settings.json",
+    "admins": "admins.json"
 }
 
-# create files if missing
+# initialize files
 for f in FILES.values():
     if not os.path.exists(f):
         with open(f, "w") as file:
@@ -41,6 +45,8 @@ users = json.load(open(FILES["users"]))
 failed = json.load(open(FILES["failed"]))
 ips = json.load(open(FILES["ips"]))
 referrals = json.load(open(FILES["refs"]))
+settings = json.load(open(FILES["settings"])) if os.path.exists(FILES["settings"]) else {}
+admins = json.load(open(FILES["admins"])) if os.path.exists(FILES["admins"]) else {}
 
 def save(name, data):
     with open(FILES[name], "w") as f:
@@ -54,18 +60,17 @@ def get_ip(req):
         return req.headers.get("X-Forwarded-For").split(",")[0]
     return req.remote_addr
 
-# HOME
-@app.route("/")
-def home():
-    return "Bot Running ✅"
+# check if user is admin
+def is_admin(user_id):
+    return str(user_id) in admins
 
-# START
+# START COMMAND
 @bot.message_handler(commands=['start'])
 def start(msg):
     user_id = str(msg.chat.id)
     args = msg.text.split()
 
-    # 🎯 REFERRAL
+    # Referral
     if len(args) > 1:
         ref = args[1]
         if ref != user_id and user_id not in referrals:
@@ -74,162 +79,116 @@ def start(msg):
             save("refs", referrals)
             bot.send_message(ref, "🎉 New referral joined!")
 
-    # ✅ VERIFIED
+    # Already verified → show main menu
     if user_id in users:
-        # Already verified → show referral button
-        markup_reply = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-        btn_ref = types.KeyboardButton("👥 Show Referrals")
-        markup_reply.add(btn_ref)
-
-        bot.send_message(msg.chat.id, "✅ You are already verified!", reply_markup=markup_reply)
+        show_main_menu(user_id, "✅ You are already verified!")
         return
 
-    # ❌ FAILED
+    # Failed users
     if user_id in failed:
-        bot.send_message(msg.chat.id, "⚠️ Device/IP already used.\nYou can still use bot.")
+        bot.send_message(user_id, "⚠️ Device/IP already used.\nYou can still use bot.")
         return
 
-    # 🆕 NEW → Only Verify Device button
-    markup_inline = types.InlineKeyboardMarkup()
-    btn_verify = types.InlineKeyboardButton(
-        "🔐 Verify Device",
-        web_app=types.WebAppInfo(DOMAIN)
-    )
-    markup_inline.add(btn_verify)
+    # Step 1: Join channel
+    join_channel_btn = types.InlineKeyboardMarkup()
+    join_btn = types.InlineKeyboardButton("➡ Join Channel", url=CHANNEL_URL)
+    join_channel_btn.add(join_btn)
+    bot.send_message(user_id, "🚀 Please join our channel first:", reply_markup=join_channel_btn)
 
-    bot.send_message(
-        msg.chat.id,
-        "🛡 Please verify your device",
-        reply_markup=markup_inline
-    )
+    # Step 2: Verify device
+    verify_btn = types.InlineKeyboardMarkup()
+    btn_verify = types.InlineKeyboardButton("🔐 Verify Device", web_app=types.WebAppInfo(DOMAIN))
+    verify_btn.add(btn_verify)
+    bot.send_message(user_id, "🛡 Verify your device:", reply_markup=verify_btn)
 
-# HANDLE REPLY KEYBOARD BUTTON
-@bot.message_handler(func=lambda message: True)
+# Show main menu after verification
+def show_main_menu(user_id, text="✅ Verified Successfully!"):
+    menu = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    menu.add("💰 Balance", "👥 Refer & Earn")
+    menu.add("🎁 Bonus", "💸 Withdraw")
+    menu.add("🛠 Set Wallet")
+    bot.send_message(user_id, text, reply_markup=menu)
+
+# HANDLE REPLY KEYBOARD
+@bot.message_handler(func=lambda m: True)
 def handle_buttons(msg):
-    if msg.text == "👥 Show Referrals":
-        user_id = str(msg.chat.id)
+    user_id = str(msg.chat.id)
+    text = msg.text
+
+    if text == "💰 Balance":
+        balance = settings.get("balances", {}).get(user_id, 0)
+        bot.send_message(user_id, f"💰 Your balance: ₹{balance}")
+    elif text == "👥 Refer & Earn":
         count = referrals.get(user_id + "_count", 0)
-        link = f"https://t.me/YOUR_BOT_USERNAME?start={user_id}"  # Replace YOUR_BOT_USERNAME
-        bot.send_message(
-            msg.chat.id,
-            f"👥 Referrals: {count}\n\n🔗 Link:\n{link}"
-        )
+        link = f"https://t.me/{BOT_USERNAME}?start={user_id}"
+        bot.send_message(user_id, f"👥 Referrals: {count}\n🔗 Link: {link}")
+    elif text == "🎁 Bonus":
+        daily_bonus = settings.get("daily_bonus", 0)
+        bot.send_message(user_id, f"🎁 Your daily bonus: ₹{daily_bonus}")
+    elif text == "💸 Withdraw":
+        withdraw_status = settings.get("withdraw_on", True)
+        bot.send_message(user_id, f"💸 Withdrawals are {'enabled' if withdraw_status else 'disabled'}")
+    elif text == "🛠 Set Wallet":
+        bot.send_message(user_id, "Please send your wallet address now.")
 
-# VERIFY API
-@app.route("/verify", methods=["POST"])
-def verify():
-    try:
-        data = request.json
-        user_id = str(data.get("user_id"))
-        device = data.get("device")
+# ADMIN PANEL INLINE BUTTONS
+@bot.message_handler(commands=['adminpanel'])
+def admin_panel(msg):
+    user_id = str(msg.chat.id)
+    if not is_admin(user_id):
+        bot.send_message(user_id, "❌ You are not an admin!")
+        return
 
-        if not user_id or not device:
-            return jsonify({"status": "error"})
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("Add Admin", callback_data="admin_add"),
+        types.InlineKeyboardButton("Remove Admin", callback_data="admin_remove"),
+        types.InlineKeyboardButton("Bot On/Off", callback_data="bot_toggle"),
+        types.InlineKeyboardButton("Withdraw On/Off", callback_data="withdraw_toggle"),
+        types.InlineKeyboardButton("Add Balance", callback_data="balance_add"),
+        types.InlineKeyboardButton("Remove Balance", callback_data="balance_remove"),
+        types.InlineKeyboardButton("Manage Channels", callback_data="channel_manage"),
+        types.InlineKeyboardButton("Set Per Refer", callback_data="set_per_refer"),
+        types.InlineKeyboardButton("Manage Bot Texts", callback_data="bot_texts"),
+        types.InlineKeyboardButton("Broadcast", callback_data="broadcast"),
+        types.InlineKeyboardButton("Daily Bonus", callback_data="daily_bonus"),
+        types.InlineKeyboardButton("Gift Code", callback_data="gift_code"),
+        types.InlineKeyboardButton("New User Notif", callback_data="user_notif"),
+        types.InlineKeyboardButton("Gateway Setup", callback_data="gateway_setup")
+    )
+    bot.send_message(user_id, "🛠 Admin Panel:", reply_markup=markup)
 
-        device_id = make_hash(device)
-        ip = get_ip(request)
+# HANDLE CALLBACK QUERIES
+@bot.callback_query_handler(func=lambda call: True)
+def admin_callback(call):
+    user_id = str(call.message.chat.id)
+    data = call.data
 
-        print(user_id, device_id, ip)
+    if not is_admin(user_id):
+        bot.answer_callback_query(call.id, "❌ You are not an admin!")
+        return
 
-        # ❌ DEVICE USED
-        if device_id in devices:
-            failed[user_id] = True
-            save("failed", failed)
-            bot.send_message(user_id, "⚠️ Device already used.\nYou can still use bot.")
-            return jsonify({"status": "failed"})
-
-        # ❌ IP USED
-        if ip in ips:
-            failed[user_id] = True
-            save("failed", failed)
-            bot.send_message(user_id, "⚠️ Multiple accounts detected.\nYou can still use bot.")
-            return jsonify({"status": "failed"})
-
-        # ✅ SUCCESS
-        devices[device_id] = user_id
-        save("devices", devices)
-
-        ips[ip] = user_id
-        save("ips", ips)
-
-        users[user_id] = True
-        save("users", users)
-
-        # Send verified message with referral button
-        markup_reply = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-        btn_ref = types.KeyboardButton("👥 Show Referrals")
-        markup_reply.add(btn_ref)
-
-        bot.send_message(
-            user_id,
-            "✅ Verified Successfully!\n🎉 Full access unlocked.",
-            reply_markup=markup_reply
-        )
-
-        return jsonify({"status": "success"})
-
-    except Exception as e:
-        print(e)
-        return jsonify({"status": "error"})
-
-# 🔐 RESET (SECRET URL)
-@app.route("/reset-data")
-def reset():
-    key = request.args.get("key")
-
-    if key != RESET_KEY:
-        return "❌ Access Denied"
-
-    for f in FILES.values():
-        with open(f, "w") as file:
-            json.dump({}, file)
-
-    return "✅ All data reset"
-
-# 🎛️ ADMIN PANEL
-@app.route("/admin")
-def admin():
-    password = request.args.get("pass")
-
-    if password != ADMIN_PASSWORD:
-        return "❌ Access Denied"
-
-    total_users = len(users)
-    verified = len(users)
-    failed_users = len(failed)
-    total_ips = len(ips)
-    total_devices = len(devices)
-    total_refs = sum([v for k, v in referrals.items() if "_count" in k])
-
-    return render_template_string(f"""
-    <html>
-    <body style="background:#0a0f1c;color:white;text-align:center;font-family:Arial;">
-    <h1>⚙️ Admin Panel</h1>
-
-    <p>👥 Users: {total_users}</p>
-    <p>✅ Verified: {verified}</p>
-    <p>❌ Failed: {failed_users}</p>
-    <p>🌍 IPs: {total_ips}</p>
-    <p>📱 Devices: {total_devices}</p>
-    <p>💰 Referrals: {total_refs}</p>
-
-    <br>
-    <a href="/reset-data?key={RESET_KEY}">
-    <button style="padding:10px;background:red;color:white;">RESET</button>
-    </a>
-
-    </body>
-    </html>
-    """)
+    # Simple example toggle
+    if data == "bot_toggle":
+        settings["bot_on"] = not settings.get("bot_on", True)
+        save("settings", settings)
+        bot.edit_message_text(chat_id=user_id, message_id=call.message.message_id, text=f"Bot is now {'ON' if settings['bot_on'] else 'OFF'}")
+    elif data == "withdraw_toggle":
+        settings["withdraw_on"] = not settings.get("withdraw_on", True)
+        save("settings", settings)
+        bot.edit_message_text(chat_id=user_id, message_id=call.message.message_id, text=f"Withdrawals are now {'ON' if settings['withdraw_on'] else 'OFF'}")
+    else:
+        bot.answer_callback_query(call.id, f"You clicked: {data} (logic to implement)")
 
 # RUN BOT
 def run_bot():
     print("🤖 Bot Started")
-    bot.remove_webhook()
     bot.infinity_polling(timeout=30, long_polling_timeout=30)
 
 threading.Thread(target=run_bot).start()
 
-# RUN SERVER
+# FLASK SERVER
 port = int(os.environ.get("PORT", 5000))
+app = Flask(__name__)
+CORS(app)
 app.run(host="0.0.0.0", port=port)
