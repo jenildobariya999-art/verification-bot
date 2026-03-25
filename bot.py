@@ -1,20 +1,21 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 from telebot import TeleBot, types
-import hashlib, json, os
-import threading
+import hashlib, json, os, threading
 
-# 🔑 TOKEN (Render env variable)
+# 🔑 CONFIG
 API_TOKEN = os.environ.get("API_TOKEN")
+DOMAIN = "https://verification-beta-five.vercel.app"
 
 if not API_TOKEN:
-    print("❌ ERROR: API_TOKEN missing")
+    print("❌ API_TOKEN missing")
     exit()
 
-# 🌐 DOMAIN (temporary, change later)
-DOMAIN = os.environ.get("DOMAIN", "https://example.com")
-
 bot = TeleBot(API_TOKEN)
+bot.remove_webhook()
+
 app = Flask(__name__)
+CORS(app)
 
 DB_FILE = "devices.json"
 
@@ -23,7 +24,6 @@ if not os.path.exists(DB_FILE):
     with open(DB_FILE, "w") as f:
         json.dump({}, f)
 
-# load data
 with open(DB_FILE, "r") as f:
     devices = json.load(f)
 
@@ -34,19 +34,26 @@ def save():
 def make_hash(data):
     return hashlib.md5(data.encode()).hexdigest()
 
-# START COMMAND
+# 🏠 HOME ROUTE
+@app.route("/")
+def home():
+    return "Bot Running ✅"
+
+# 🤖 START COMMAND
 @bot.message_handler(commands=['start'])
 def start(msg):
     markup = types.InlineKeyboardMarkup()
+
     btn = types.InlineKeyboardButton(
         "🔐 Verify Device",
         web_app=types.WebAppInfo(DOMAIN)
     )
+
     markup.add(btn)
 
-    bot.send_message(msg.chat.id, "Click to verify device", reply_markup=markup)
+    bot.send_message(msg.chat.id, "Click below to verify device", reply_markup=markup)
 
-# VERIFY API
+# 🔐 VERIFY API
 @app.route("/verify", methods=["POST"])
 def verify():
     try:
@@ -60,29 +67,37 @@ def verify():
 
         device_id = make_hash(device)
 
+        # ❌ already used
         if device_id in devices:
-            return jsonify({"status": "failed"})
+            return jsonify({
+                "status": "failed",
+                "message": "Device already used"
+            })
 
+        # ✅ new device
         devices[device_id] = user_id
         save()
 
         bot.send_message(user_id, "✅ Verified Successfully!")
 
-        return jsonify({"status": "success"})
+        return jsonify({
+            "status": "success",
+            "message": "Verified"
+        })
 
     except Exception as e:
         print("ERROR:", e)
         return jsonify({"status": "error"})
 
-# RUN BOT (THREAD)
+# 🤖 RUN BOT
 def run_bot():
     print("🤖 Bot Started")
     bot.infinity_polling()
 
 threading.Thread(target=run_bot).start()
 
-# RUN SERVER
+# 🌐 RUN SERVER
 port = int(os.environ.get("PORT", 5000))
-print("🌐 Server Running on port", port)
+print("🌐 Server Running")
 
 app.run(host="0.0.0.0", port=port)
