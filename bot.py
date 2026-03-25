@@ -18,18 +18,28 @@ app = Flask(__name__)
 CORS(app)
 
 DB_FILE = "devices.json"
+USER_FILE = "users.json"
 
-# ensure file exists
-if not os.path.exists(DB_FILE):
-    with open(DB_FILE, "w") as f:
-        json.dump({}, f)
+# create files if not exist
+for file in [DB_FILE, USER_FILE]:
+    if not os.path.exists(file):
+        with open(file, "w") as f:
+            json.dump({}, f)
 
+# load data
 with open(DB_FILE, "r") as f:
     devices = json.load(f)
 
-def save():
+with open(USER_FILE, "r") as f:
+    users = json.load(f)
+
+def save_devices():
     with open(DB_FILE, "w") as f:
         json.dump(devices, f)
+
+def save_users():
+    with open(USER_FILE, "w") as f:
+        json.dump(users, f)
 
 def make_hash(data):
     return hashlib.md5(data.encode()).hexdigest()
@@ -42,6 +52,17 @@ def home():
 # START
 @bot.message_handler(commands=['start'])
 def start(msg):
+    user_id = str(msg.chat.id)
+
+    # ✅ already verified
+    if user_id in users:
+        bot.send_message(
+            msg.chat.id,
+            "✅ You are already verified!\n\nWelcome back 🎉"
+        )
+        return
+
+    # ❌ not verified
     markup = types.InlineKeyboardMarkup()
 
     btn = types.InlineKeyboardButton(
@@ -53,7 +74,7 @@ def start(msg):
 
     bot.send_message(
         msg.chat.id,
-        "🛡 Click below to verify your device",
+        "🛡 Please verify your device to continue",
         reply_markup=markup
     )
 
@@ -73,7 +94,7 @@ def verify():
 
         print(f"USER: {user_id} | DEVICE: {device_id}")
 
-        # ❌ already used
+        # ❌ already used device
         if device_id in devices:
             bot.send_message(
                 user_id,
@@ -86,11 +107,15 @@ def verify():
 
         # ✅ new device
         devices[device_id] = user_id
-        save()
+        save_devices()
+
+        # ✅ mark user verified
+        users[user_id] = True
+        save_users()
 
         bot.send_message(
             user_id,
-            "✅ Verified Successfully!\n\n🎉 You can now continue."
+            "✅ Verified Successfully!\n\n🎉 You can now use the bot."
         )
 
         return jsonify({
