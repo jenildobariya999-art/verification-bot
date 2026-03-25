@@ -5,7 +5,7 @@ import hashlib, json, os, threading
 
 # CONFIG
 API_TOKEN = os.environ.get("API_TOKEN")
-DOMAIN = "https://verification-beta-five.vercel.app"
+DOMAIN = "https://verification-beta-five.vercel.app"  # Replace with your domain
 
 ADMIN_PASSWORD = "admin123"
 RESET_KEY = "MY_SECRET_123"
@@ -76,7 +76,12 @@ def start(msg):
 
     # ✅ VERIFIED
     if user_id in users:
-        bot.send_message(msg.chat.id, "✅ You are already verified!")
+        # Already verified → show referral button
+        markup_reply = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+        btn_ref = types.KeyboardButton("👥 Show Referrals")
+        markup_reply.add(btn_ref)
+
+        bot.send_message(msg.chat.id, "✅ You are already verified!", reply_markup=markup_reply)
         return
 
     # ❌ FAILED
@@ -84,8 +89,7 @@ def start(msg):
         bot.send_message(msg.chat.id, "⚠️ Device/IP already used.\nYou can still use bot.")
         return
 
-    # 🆕 NEW
-    # Inline button for web verification
+    # 🆕 NEW → Only Verify Device button
     markup_inline = types.InlineKeyboardMarkup()
     btn_verify = types.InlineKeyboardButton(
         "🔐 Verify Device",
@@ -93,22 +97,10 @@ def start(msg):
     )
     markup_inline.add(btn_verify)
 
-    # Reply keyboard for other actions
-    markup_reply = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    btn_ref = types.KeyboardButton("👥 Show Referrals")
-    markup_reply.add(btn_ref)
-
-    # Send message with both keyboards
     bot.send_message(
         msg.chat.id,
         "🛡 Please verify your device",
         reply_markup=markup_inline
-    )
-
-    bot.send_message(
-        msg.chat.id,
-        "Select an option below 👇",
-        reply_markup=markup_reply
     )
 
 # HANDLE REPLY KEYBOARD BUTTON
@@ -117,7 +109,7 @@ def handle_buttons(msg):
     if msg.text == "👥 Show Referrals":
         user_id = str(msg.chat.id)
         count = referrals.get(user_id + "_count", 0)
-        link = f"https://t.me/YOUR_BOT_USERNAME?start={user_id}"
+        link = f"https://t.me/YOUR_BOT_USERNAME?start={user_id}"  # Replace YOUR_BOT_USERNAME
         bot.send_message(
             msg.chat.id,
             f"👥 Referrals: {count}\n\n🔗 Link:\n{link}"
@@ -143,7 +135,6 @@ def verify():
         if device_id in devices:
             failed[user_id] = True
             save("failed", failed)
-
             bot.send_message(user_id, "⚠️ Device already used.\nYou can still use bot.")
             return jsonify({"status": "failed"})
 
@@ -151,7 +142,6 @@ def verify():
         if ip in ips:
             failed[user_id] = True
             save("failed", failed)
-
             bot.send_message(user_id, "⚠️ Multiple accounts detected.\nYou can still use bot.")
             return jsonify({"status": "failed"})
 
@@ -165,7 +155,17 @@ def verify():
         users[user_id] = True
         save("users", users)
 
-        bot.send_message(user_id, "✅ Verified Successfully!\n🎉 Full access unlocked.")
+        # Send verified message with referral button
+        markup_reply = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+        btn_ref = types.KeyboardButton("👥 Show Referrals")
+        markup_reply.add(btn_ref)
+
+        bot.send_message(
+            user_id,
+            "✅ Verified Successfully!\n🎉 Full access unlocked.",
+            reply_markup=markup_reply
+        )
+
         return jsonify({"status": "success"})
 
     except Exception as e:
