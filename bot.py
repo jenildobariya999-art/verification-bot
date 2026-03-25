@@ -65,9 +65,6 @@ def start(msg):
     user_id = str(msg.chat.id)
     args = msg.text.split()
 
-    # Remove any old keyboard / command suggestions
-    remove_keyboard = types.ReplyKeyboardRemove()
-
     # 🎯 REFERRAL
     if len(args) > 1:
         ref = args[1]
@@ -75,43 +72,56 @@ def start(msg):
             referrals[user_id] = ref
             referrals[ref + "_count"] = referrals.get(ref + "_count", 0) + 1
             save("refs", referrals)
-            bot.send_message(ref, "🎉 New referral joined!", reply_markup=remove_keyboard)
+            bot.send_message(ref, "🎉 New referral joined!")
 
     # ✅ VERIFIED
     if user_id in users:
-        bot.send_message(msg.chat.id, "✅ You are already verified!", reply_markup=remove_keyboard)
+        bot.send_message(msg.chat.id, "✅ You are already verified!")
         return
 
     # ❌ FAILED
     if user_id in failed:
-        bot.send_message(msg.chat.id, "⚠️ Device/IP already used.\nYou can still use bot.", reply_markup=remove_keyboard)
+        bot.send_message(msg.chat.id, "⚠️ Device/IP already used.\nYou can still use bot.")
         return
 
     # 🆕 NEW
-    markup = types.InlineKeyboardMarkup()
-    btn = types.InlineKeyboardButton(
+    # Inline button for web verification
+    markup_inline = types.InlineKeyboardMarkup()
+    btn_verify = types.InlineKeyboardButton(
         "🔐 Verify Device",
         web_app=types.WebAppInfo(DOMAIN)
     )
-    markup.add(btn)
+    markup_inline.add(btn_verify)
 
+    # Reply keyboard for other actions
+    markup_reply = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    btn_ref = types.KeyboardButton("👥 Show Referrals")
+    markup_reply.add(btn_ref)
+
+    # Send message with both keyboards
     bot.send_message(
         msg.chat.id,
         "🛡 Please verify your device",
-        reply_markup=markup
+        reply_markup=markup_inline
     )
-
-# REF COMMAND
-@bot.message_handler(commands=['ref'])
-def ref(msg):
-    user_id = str(msg.chat.id)
-    count = referrals.get(user_id + "_count", 0)
-    link = f"https://t.me/YOUR_BOT_USERNAME?start={user_id}"
 
     bot.send_message(
         msg.chat.id,
-        f"👥 Referrals: {count}\n\n🔗 Link:\n{link}"
+        "Select an option below 👇",
+        reply_markup=markup_reply
     )
+
+# HANDLE REPLY KEYBOARD BUTTON
+@bot.message_handler(func=lambda message: True)
+def handle_buttons(msg):
+    if msg.text == "👥 Show Referrals":
+        user_id = str(msg.chat.id)
+        count = referrals.get(user_id + "_count", 0)
+        link = f"https://t.me/YOUR_BOT_USERNAME?start={user_id}"
+        bot.send_message(
+            msg.chat.id,
+            f"👥 Referrals: {count}\n\n🔗 Link:\n{link}"
+        )
 
 # VERIFY API
 @app.route("/verify", methods=["POST"])
