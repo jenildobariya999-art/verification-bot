@@ -29,7 +29,7 @@ FILES = {
     "refs": "referrals.json"
 }
 
-# create files
+# create files if missing
 for f in FILES.values():
     if not os.path.exists(f):
         with open(f, "w") as file:
@@ -65,6 +65,9 @@ def start(msg):
     user_id = str(msg.chat.id)
     args = msg.text.split()
 
+    # Remove any old keyboard / command suggestions
+    remove_keyboard = types.ReplyKeyboardRemove()
+
     # 🎯 REFERRAL
     if len(args) > 1:
         ref = args[1]
@@ -72,16 +75,16 @@ def start(msg):
             referrals[user_id] = ref
             referrals[ref + "_count"] = referrals.get(ref + "_count", 0) + 1
             save("refs", referrals)
-            bot.send_message(ref, "🎉 New referral joined!")
+            bot.send_message(ref, "🎉 New referral joined!", reply_markup=remove_keyboard)
 
     # ✅ VERIFIED
     if user_id in users:
-        bot.send_message(msg.chat.id, "✅ You are already verified!")
+        bot.send_message(msg.chat.id, "✅ You are already verified!", reply_markup=remove_keyboard)
         return
 
     # ❌ FAILED
     if user_id in failed:
-        bot.send_message(msg.chat.id, "⚠️ Device/IP already used.\nYou can still use bot.")
+        bot.send_message(msg.chat.id, "⚠️ Device/IP already used.\nYou can still use bot.", reply_markup=remove_keyboard)
         return
 
     # 🆕 NEW
@@ -92,14 +95,18 @@ def start(msg):
     )
     markup.add(btn)
 
-    bot.send_message(msg.chat.id, "🛡 Please verify your device", reply_markup=markup)
+    bot.send_message(
+        msg.chat.id,
+        "🛡 Please verify your device",
+        reply_markup=markup
+    )
 
 # REF COMMAND
 @bot.message_handler(commands=['ref'])
 def ref(msg):
     user_id = str(msg.chat.id)
     count = referrals.get(user_id + "_count", 0)
-    link = f"https://t.me/TestingOnTop_bot?start={user_id}"
+    link = f"https://t.me/YOUR_BOT_USERNAME?start={user_id}"
 
     bot.send_message(
         msg.chat.id,
