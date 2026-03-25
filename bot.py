@@ -49,7 +49,7 @@ def make_hash(data):
 def home():
     return "Bot Running ✅"
 
-# START
+# START COMMAND
 @bot.message_handler(commands=['start'])
 def start(msg):
     user_id = str(msg.chat.id)
@@ -62,7 +62,7 @@ def start(msg):
         )
         return
 
-    # ❌ not verified
+    # ❌ not verified (still allowed)
     markup = types.InlineKeyboardMarkup()
 
     btn = types.InlineKeyboardButton(
@@ -74,7 +74,7 @@ def start(msg):
 
     bot.send_message(
         msg.chat.id,
-        "🛡 Please verify your device to continue",
+        "🛡 Verify your device (optional)\n\n⚠️ Same device may fail but you can still use the bot.",
         reply_markup=markup
     )
 
@@ -94,33 +94,32 @@ def verify():
 
         print(f"USER: {user_id} | DEVICE: {device_id}")
 
-        # ❌ already used device
+        # ❌ SAME DEVICE
         if device_id in devices:
             bot.send_message(
                 user_id,
-                "❌ Verification Failed\n\nDevice already used."
+                "⚠️ Device already used.\n\nYou can still use the bot but verification failed."
             )
+
             return jsonify({
                 "status": "failed",
                 "message": "Device already used"
             })
 
-        # ✅ new device
+        # ✅ NEW DEVICE
         devices[device_id] = user_id
         save_devices()
 
-        # ✅ mark user verified
         users[user_id] = True
         save_users()
 
         bot.send_message(
             user_id,
-            "✅ Verified Successfully!\n\n🎉 You can now use the bot."
+            "✅ Verified Successfully!\n\n🎉 Full access unlocked."
         )
 
         return jsonify({
-            "status": "success",
-            "message": "Verified"
+            "status": "success"
         })
 
     except Exception as e:
