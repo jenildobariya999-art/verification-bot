@@ -8,6 +8,7 @@ API_TOKEN = os.environ.get("API_TOKEN")
 DOMAIN = "https://verification-beta-five.vercel.app"
 
 ADMIN_IDS = ["6925391837", "7528813331"]
+bot_status = True
 
 # ===== INIT =====
 bot = TeleBot(API_TOKEN, parse_mode="HTML")
@@ -28,7 +29,6 @@ FILES = {
     "texts": "texts.json"
 }
 
-# ===== CREATE FILES =====
 default_texts = {
     "welcome": "🏠 <b>Welcome Back!</b>",
     "verify_msg": "🛡 <b>Please verify first</b>",
@@ -43,7 +43,7 @@ for name, f in FILES.items():
         with open(f, "w") as file:
             json.dump(default_texts if name == "texts" else {}, file)
 
-# ===== LOAD DATA =====
+# ===== LOAD =====
 devices = json.load(open(FILES["devices"]))
 users = json.load(open(FILES["users"]))
 failed = json.load(open(FILES["failed"]))
@@ -86,7 +86,6 @@ def start(msg):
     uid = str(msg.chat.id)
     args = msg.text.split()
 
-    # referral
     if len(args) > 1:
         ref = args[1]
         if ref != uid and uid not in refs:
@@ -117,7 +116,7 @@ def user_buttons(msg):
         bot.send_message(uid, f"💰 <b>Balance:</b> ₹{balance.get(uid,0)}")
 
     elif msg.text == "👥 Refer":
-        link = f"https://t.me/TestingonTop_bot?start={uid}"
+        link = f"https://t.me/YOUR_BOT_USERNAME?start={uid}"
         bot.send_message(uid, f"👥 <b>Referrals:</b> {refs.get(uid+'_count',0)}\n\n🔗 {link}")
 
     elif msg.text == "🎁 Redeem Code":
@@ -148,10 +147,27 @@ def adminpanel(msg):
     if not is_admin(msg.chat.id):
         return bot.send_message(msg.chat.id, "❌ Denied")
 
-    m = types.InlineKeyboardMarkup()
-    m.add(types.InlineKeyboardButton("📢 Broadcast", callback_data="bc"))
-    m.add(types.InlineKeyboardButton("💰 Add Balance", callback_data="bal"))
-    m.add(types.InlineKeyboardButton("✏️ Edit Texts", callback_data="edit"))
+    m = types.InlineKeyboardMarkup(row_width=2)
+
+    m.add(
+        types.InlineKeyboardButton("👤 Add Admin", callback_data="add_admin"),
+        types.InlineKeyboardButton("❌ Remove Admin", callback_data="remove_admin")
+    )
+    m.add(
+        types.InlineKeyboardButton("🤖 Bot ON/OFF", callback_data="bot_toggle"),
+        types.InlineKeyboardButton("👥 Total Users", callback_data="total_users")
+    )
+    m.add(
+        types.InlineKeyboardButton("💰 Add Balance", callback_data="addbal"),
+        types.InlineKeyboardButton("💸 Remove Balance", callback_data="rembal")
+    )
+    m.add(
+        types.InlineKeyboardButton("🎁 Gift Code", callback_data="gift"),
+        types.InlineKeyboardButton("📢 Broadcast", callback_data="bc")
+    )
+    m.add(
+        types.InlineKeyboardButton("✏️ Edit Texts", callback_data="edit")
+    )
 
     bot.send_message(msg.chat.id, "🎛 <b>Admin Panel</b>", reply_markup=m)
 
@@ -163,28 +179,73 @@ def cb(call):
     if not is_admin(uid):
         return
 
-    if call.data == "bc":
-        bot.clear_step_handler_by_chat_id(uid)
-        msg = bot.send_message(uid, "Send message:")
-        bot.register_next_step_handler(msg, broadcast)
+    data = call.data
 
-    elif call.data == "bal":
-        bot.clear_step_handler_by_chat_id(uid)
+    if data == "bot_toggle":
+        global bot_status
+        bot_status = not bot_status
+        bot.send_message(uid, f"🤖 Bot {'ON' if bot_status else 'OFF'}")
+
+    elif data == "total_users":
+        bot.send_message(uid, f"👥 Total Users: {len(users)}")
+
+    elif data == "add_admin":
+        msg = bot.send_message(uid, "Send user ID")
+        bot.register_next_step_handler(msg, add_admin)
+
+    elif data == "remove_admin":
+        msg = bot.send_message(uid, "Send user ID")
+        bot.register_next_step_handler(msg, remove_admin)
+
+    elif data == "addbal":
         msg = bot.send_message(uid, "user_id amount")
         bot.register_next_step_handler(msg, addbal)
 
-    elif call.data == "edit":
+    elif data == "rembal":
+        msg = bot.send_message(uid, "user_id amount")
+        bot.register_next_step_handler(msg, rembal)
+
+    elif data == "bc":
+        msg = bot.send_message(uid, "Send message")
+        bot.register_next_step_handler(msg, broadcast)
+
+    elif data == "gift":
+        msg = bot.send_message(uid, "code amount")
+        bot.register_next_step_handler(msg, creategift)
+
+    elif data == "edit":
         mk = types.InlineKeyboardMarkup()
         for k in texts:
             mk.add(types.InlineKeyboardButton(k, callback_data=f"edit_{k}"))
-        bot.send_message(uid, "Select text:", reply_markup=mk)
+        bot.send_message(uid, "Select text", reply_markup=mk)
 
-    elif call.data.startswith("edit_"):
-        key = call.data.replace("edit_", "")
-        msg = bot.send_message(uid, f"Send new text for <b>{key}</b>")
+    elif data.startswith("edit_"):
+        key = data.replace("edit_", "")
+        msg = bot.send_message(uid, f"Send new text for {key}")
         bot.register_next_step_handler(msg, save_text, key)
 
 # ===== ADMIN FUNCTIONS =====
+def add_admin(msg):
+    ADMIN_IDS.append(msg.text)
+    bot.send_message(msg.chat.id, "Added")
+
+def remove_admin(msg):
+    if msg.text in ADMIN_IDS:
+        ADMIN_IDS.remove(msg.text)
+    bot.send_message(msg.chat.id, "Removed")
+
+def addbal(msg):
+    uid, amt = msg.text.split()
+    balance[uid] = balance.get(uid, 0) + float(amt)
+    save("balance", balance)
+    bot.send_message(msg.chat.id, "Done")
+
+def rembal(msg):
+    uid, amt = msg.text.split()
+    balance[uid] = balance.get(uid, 0) - float(amt)
+    save("balance", balance)
+    bot.send_message(msg.chat.id, "Done")
+
 def broadcast(msg):
     for u in users:
         try:
@@ -192,16 +253,16 @@ def broadcast(msg):
         except:
             pass
 
-def addbal(msg):
-    uid, amt = msg.text.split()
-    balance[uid] = balance.get(uid, 0) + float(amt)
-    save("balance", balance)
-    bot.send_message(msg.chat.id, "✅ Done")
+def creategift(msg):
+    code, amt = msg.text.split()
+    gift[code] = float(amt)
+    save("gift", gift)
+    bot.send_message(msg.chat.id, f"Gift: {code}")
 
 def save_text(msg, key):
     texts[key] = msg.text
     save("texts", texts)
-    bot.send_message(msg.chat.id, f"✅ Updated <b>{key}</b>")
+    bot.send_message(msg.chat.id, "Updated")
 
 # ===== VERIFY =====
 @app.route("/verify", methods=["POST"])
