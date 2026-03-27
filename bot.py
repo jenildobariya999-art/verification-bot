@@ -7,7 +7,7 @@ import hashlib, json, os, threading
 API_TOKEN = os.environ.get("API_TOKEN")
 DOMAIN = "https://verification-beta-five.vercel.app"
 
-ADMIN_IDS = ["6925391837"]
+ADMIN_IDS = ["123456789"]  # CHANGE
 bot_status = True
 
 # ===== INIT =====
@@ -27,11 +27,13 @@ FILES = {
     "gift": "gift.json"
 }
 
+# create files
 for f in FILES.values():
     if not os.path.exists(f):
         with open(f, "w") as file:
             json.dump({}, file)
 
+# load data
 devices = json.load(open(FILES["devices"]))
 users = json.load(open(FILES["users"]))
 failed = json.load(open(FILES["failed"]))
@@ -54,6 +56,11 @@ def get_ip(req):
     if req.headers.get("X-Forwarded-For"):
         return req.headers.get("X-Forwarded-For").split(",")[0]
     return req.remote_addr
+
+# ===== HOME ROUTE (FIXED 404) =====
+@app.route("/")
+def home():
+    return "Bot Running ✅"
 
 # ===== USER MENU =====
 def main_menu():
@@ -87,13 +94,13 @@ def start(msg):
         bot.send_message(msg.chat.id, "⚠️ Device/IP already used\nLimited access", reply_markup=main_menu())
         return
 
-    # new
+    # new user
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("🔐 Verify", web_app=types.WebAppInfo(DOMAIN)))
 
     bot.send_message(msg.chat.id, "🛡 Please verify first", reply_markup=markup)
 
-# ===== USER BUTTONS =====
+# ===== USER BUTTON HANDLER (FIXED) =====
 @bot.message_handler(func=lambda m: m.text in ["💰 Balance", "👥 Refer", "🎁 Redeem Code", "📊 My Info"])
 def user_buttons(msg):
     user_id = str(msg.chat.id)
@@ -144,7 +151,7 @@ def adminpanel(msg):
 
     bot.send_message(msg.chat.id, "🎛 Admin Panel", reply_markup=m)
 
-# ===== CALLBACK =====
+# ===== CALLBACK (FIXED SINGLE HANDLER) =====
 @bot.callback_query_handler(func=lambda call: True)
 def cb(call):
     uid = str(call.from_user.id)
