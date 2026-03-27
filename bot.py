@@ -55,7 +55,7 @@ def get_ip(req):
         return req.headers.get("X-Forwarded-For").split(",")[0]
     return req.remote_addr
 
-# ===== USER KEYBOARD =====
+# ===== USER MENU =====
 def main_menu():
     m = types.ReplyKeyboardMarkup(resize_keyboard=True)
     m.row("💰 Balance", "👥 Refer")
@@ -84,31 +84,32 @@ def start(msg):
 
     # failed
     if user_id in failed:
-        bot.send_message(msg.chat.id, "⚠️ Already used device/IP\nLimited access", reply_markup=main_menu())
+        bot.send_message(msg.chat.id, "⚠️ Device/IP already used\nLimited access", reply_markup=main_menu())
         return
 
-    # new user
+    # new
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("🔐 Verify", web_app=types.WebAppInfo(DOMAIN)))
 
     bot.send_message(msg.chat.id, "🛡 Please verify first", reply_markup=markup)
 
-# ===== USER BUTTON HANDLER =====
-@bot.message_handler(func=lambda m: True)
+# ===== USER BUTTONS =====
+@bot.message_handler(func=lambda m: m.text in ["💰 Balance", "👥 Refer", "🎁 Redeem Code", "📊 My Info"])
 def user_buttons(msg):
     user_id = str(msg.chat.id)
     text = msg.text
 
     if text == "💰 Balance":
         bal = balance.get(user_id, 0)
-        bot.send_message(user_id, f"💰 Your Balance: ₹{bal}")
+        bot.send_message(user_id, f"💰 Balance: ₹{bal}")
 
     elif text == "👥 Refer":
         count = refs.get(user_id+"_count", 0)
-        link = f"https://t.me/TesingOnTop_bot?start={user_id}"
+        link = f"https://t.me/YOUR_BOT_USERNAME?start={user_id}"
         bot.send_message(user_id, f"👥 Referrals: {count}\n\n🔗 {link}")
 
     elif text == "🎁 Redeem Code":
+        bot.clear_step_handler_by_chat_id(msg.chat.id)
         msg2 = bot.send_message(user_id, "Enter Gift Code:")
         bot.register_next_step_handler(msg2, redeem_code)
 
@@ -127,7 +128,7 @@ def redeem_code(msg):
         save("gift", gift)
         save("balance", balance)
 
-        bot.send_message(user_id, f"✅ Code Redeemed ₹{amount}")
+        bot.send_message(user_id, f"✅ ₹{amount} Added")
     else:
         bot.send_message(user_id, "❌ Invalid Code")
 
@@ -141,33 +142,40 @@ def adminpanel(msg):
     m.add(types.InlineKeyboardButton("📢 Broadcast", callback_data="bc"))
     m.add(types.InlineKeyboardButton("💰 Add Balance", callback_data="addbal"))
 
-    bot.send_message(msg.chat.id, "Admin Panel", reply_markup=m)
+    bot.send_message(msg.chat.id, "🎛 Admin Panel", reply_markup=m)
 
+# ===== CALLBACK =====
 @bot.callback_query_handler(func=lambda call: True)
 def cb(call):
-    if not is_admin(call.from_user.id):
+    uid = str(call.from_user.id)
+
+    if not is_admin(uid):
         return
 
     if call.data == "bc":
-        msg = bot.send_message(call.message.chat.id, "Send msg")
+        bot.clear_step_handler_by_chat_id(call.message.chat.id)
+        msg = bot.send_message(uid, "Send message:")
         bot.register_next_step_handler(msg, broadcast)
 
     elif call.data == "addbal":
-        msg = bot.send_message(call.message.chat.id, "user_id amount")
+        bot.clear_step_handler_by_chat_id(call.message.chat.id)
+        msg = bot.send_message(uid, "Send: user_id amount")
         bot.register_next_step_handler(msg, addbal)
 
+# ===== ADMIN FUNCTIONS =====
 def broadcast(msg):
     for u in users:
         try:
             bot.send_message(u, msg.text)
         except:
             pass
+    bot.send_message(msg.chat.id, "✅ Broadcast Done")
 
 def addbal(msg):
     uid, amt = msg.text.split()
     balance[uid] = balance.get(uid, 0) + float(amt)
     save("balance", balance)
-    bot.send_message(msg.chat.id, "Added")
+    bot.send_message(msg.chat.id, "✅ Balance Added")
 
 # ===== VERIFY =====
 @app.route("/verify", methods=["POST"])
@@ -197,7 +205,7 @@ def verify():
 
 # ===== RUN =====
 def run():
-    bot.infinity_polling()
+    bot.infinity_polling(skip_pending=True)
 
 threading.Thread(target=run).start()
 
