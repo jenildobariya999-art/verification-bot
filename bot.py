@@ -7,16 +7,16 @@ import hashlib, json, os, threading
 API_TOKEN = os.environ.get("API_TOKEN")
 DOMAIN = "https://verification-beta-five.vercel.app"
 
-ADMIN_IDS = ["6925391837"]  # CHANGE
-bot_status = True
+ADMIN_IDS = ["6925391837", "7528813331"]
 
 # ===== INIT =====
-bot = TeleBot(API_TOKEN)
+bot = TeleBot(API_TOKEN, parse_mode="HTML")
 bot.remove_webhook()
 
 app = Flask(__name__)
 CORS(app)
 
+# ===== FILES =====
 FILES = {
     "devices": "devices.json",
     "users": "users.json",
@@ -24,16 +24,26 @@ FILES = {
     "ips": "ips.json",
     "refs": "referrals.json",
     "balance": "balance.json",
-    "gift": "gift.json"
+    "gift": "gift.json",
+    "texts": "texts.json"
 }
 
-# create files
-for f in FILES.values():
+# ===== CREATE FILES =====
+default_texts = {
+    "welcome": "🏠 <b>Welcome Back!</b>",
+    "verify_msg": "🛡 <b>Please verify first</b>",
+    "success": "✅ <b>Verified Successfully!</b>",
+    "failed": "⚠️ <b>Device/IP already used</b>",
+    "menu": "👇 <b>Choose option:</b>",
+    "redeem": "🎁 <b>Enter Gift Code:</b>"
+}
+
+for name, f in FILES.items():
     if not os.path.exists(f):
         with open(f, "w") as file:
-            json.dump({}, file)
+            json.dump(default_texts if name == "texts" else {}, file)
 
-# load data
+# ===== LOAD DATA =====
 devices = json.load(open(FILES["devices"]))
 users = json.load(open(FILES["users"]))
 failed = json.load(open(FILES["failed"]))
@@ -41,6 +51,7 @@ ips = json.load(open(FILES["ips"]))
 refs = json.load(open(FILES["refs"]))
 balance = json.load(open(FILES["balance"]))
 gift = json.load(open(FILES["gift"]))
+texts = json.load(open(FILES["texts"]))
 
 def save(name, data):
     with open(FILES[name], "w") as f:
@@ -57,12 +68,12 @@ def get_ip(req):
         return req.headers.get("X-Forwarded-For").split(",")[0]
     return req.remote_addr
 
-# ===== HOME ROUTE (FIXED 404) =====
+# ===== HOME =====
 @app.route("/")
 def home():
     return "Bot Running ✅"
 
-# ===== USER MENU =====
+# ===== MENU =====
 def main_menu():
     m = types.ReplyKeyboardMarkup(resize_keyboard=True)
     m.row("💰 Balance", "👥 Refer")
@@ -72,72 +83,64 @@ def main_menu():
 # ===== START =====
 @bot.message_handler(commands=['start'])
 def start(msg):
-    user_id = str(msg.chat.id)
+    uid = str(msg.chat.id)
     args = msg.text.split()
 
     # referral
     if len(args) > 1:
         ref = args[1]
-        if ref != user_id and user_id not in refs:
-            refs[user_id] = ref
+        if ref != uid and uid not in refs:
+            refs[uid] = ref
             refs[ref+"_count"] = refs.get(ref+"_count", 0) + 1
             save("refs", refs)
-            bot.send_message(ref, "🎉 New referral!")
+            bot.send_message(ref, "🎉 <b>New Referral Joined!</b>")
 
-    # verified
-    if user_id in users:
-        bot.send_message(msg.chat.id, "🏠 Welcome Back!", reply_markup=main_menu())
+    if uid in users:
+        bot.send_message(uid, texts["welcome"], reply_markup=main_menu())
         return
 
-    # failed
-    if user_id in failed:
-        bot.send_message(msg.chat.id, "⚠️ Device/IP already used\nLimited access", reply_markup=main_menu())
+    if uid in failed:
+        bot.send_message(uid, texts["failed"], reply_markup=main_menu())
         return
 
-    # new user
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("🔐 Verify", web_app=types.WebAppInfo(DOMAIN)))
 
-    bot.send_message(msg.chat.id, "🛡 Please verify first", reply_markup=markup)
+    bot.send_message(uid, texts["verify_msg"], reply_markup=markup)
 
-# ===== USER BUTTON HANDLER (FIXED) =====
+# ===== USER BUTTONS =====
 @bot.message_handler(func=lambda m: m.text in ["💰 Balance", "👥 Refer", "🎁 Redeem Code", "📊 My Info"])
 def user_buttons(msg):
-    user_id = str(msg.chat.id)
-    text = msg.text
+    uid = str(msg.chat.id)
 
-    if text == "💰 Balance":
-        bal = balance.get(user_id, 0)
-        bot.send_message(user_id, f"💰 Balance: ₹{bal}")
+    if msg.text == "💰 Balance":
+        bot.send_message(uid, f"💰 <b>Balance:</b> ₹{balance.get(uid,0)}")
 
-    elif text == "👥 Refer":
-        count = refs.get(user_id+"_count", 0)
-        link = f"https://t.me/YOUR_BOT_USERNAME?start={user_id}"
-        bot.send_message(user_id, f"👥 Referrals: {count}\n\n🔗 {link}")
+    elif msg.text == "👥 Refer":
+        link = f"https://t.me/TestingonTop_bot?start={uid}"
+        bot.send_message(uid, f"👥 <b>Referrals:</b> {refs.get(uid+'_count',0)}\n\n🔗 {link}")
 
-    elif text == "🎁 Redeem Code":
-        bot.clear_step_handler_by_chat_id(msg.chat.id)
-        msg2 = bot.send_message(user_id, "Enter Gift Code:")
-        bot.register_next_step_handler(msg2, redeem_code)
+    elif msg.text == "🎁 Redeem Code":
+        bot.clear_step_handler_by_chat_id(uid)
+        msg2 = bot.send_message(uid, texts["redeem"])
+        bot.register_next_step_handler(msg2, redeem)
 
-    elif text == "📊 My Info":
-        bot.send_message(user_id, f"🆔 ID: {user_id}")
+    elif msg.text == "📊 My Info":
+        bot.send_message(uid, f"🆔 <b>ID:</b> {uid}")
 
 # ===== REDEEM =====
-def redeem_code(msg):
+def redeem(msg):
     code = msg.text
-    user_id = str(msg.chat.id)
+    uid = str(msg.chat.id)
 
     if code in gift:
-        amount = gift.pop(code)
-        balance[user_id] = balance.get(user_id, 0) + amount
-
+        amt = gift.pop(code)
+        balance[uid] = balance.get(uid, 0) + amt
         save("gift", gift)
         save("balance", balance)
-
-        bot.send_message(user_id, f"✅ ₹{amount} Added")
+        bot.send_message(uid, f"✅ <b>₹{amt} Added</b>")
     else:
-        bot.send_message(user_id, "❌ Invalid Code")
+        bot.send_message(uid, "❌ Invalid Code")
 
 # ===== ADMIN PANEL =====
 @bot.message_handler(commands=['adminpanel'])
@@ -147,11 +150,12 @@ def adminpanel(msg):
 
     m = types.InlineKeyboardMarkup()
     m.add(types.InlineKeyboardButton("📢 Broadcast", callback_data="bc"))
-    m.add(types.InlineKeyboardButton("💰 Add Balance", callback_data="addbal"))
+    m.add(types.InlineKeyboardButton("💰 Add Balance", callback_data="bal"))
+    m.add(types.InlineKeyboardButton("✏️ Edit Texts", callback_data="edit"))
 
-    bot.send_message(msg.chat.id, "🎛 Admin Panel", reply_markup=m)
+    bot.send_message(msg.chat.id, "🎛 <b>Admin Panel</b>", reply_markup=m)
 
-# ===== CALLBACK (FIXED SINGLE HANDLER) =====
+# ===== CALLBACK =====
 @bot.callback_query_handler(func=lambda call: True)
 def cb(call):
     uid = str(call.from_user.id)
@@ -160,14 +164,25 @@ def cb(call):
         return
 
     if call.data == "bc":
-        bot.clear_step_handler_by_chat_id(call.message.chat.id)
+        bot.clear_step_handler_by_chat_id(uid)
         msg = bot.send_message(uid, "Send message:")
         bot.register_next_step_handler(msg, broadcast)
 
-    elif call.data == "addbal":
-        bot.clear_step_handler_by_chat_id(call.message.chat.id)
-        msg = bot.send_message(uid, "Send: user_id amount")
+    elif call.data == "bal":
+        bot.clear_step_handler_by_chat_id(uid)
+        msg = bot.send_message(uid, "user_id amount")
         bot.register_next_step_handler(msg, addbal)
+
+    elif call.data == "edit":
+        mk = types.InlineKeyboardMarkup()
+        for k in texts:
+            mk.add(types.InlineKeyboardButton(k, callback_data=f"edit_{k}"))
+        bot.send_message(uid, "Select text:", reply_markup=mk)
+
+    elif call.data.startswith("edit_"):
+        key = call.data.replace("edit_", "")
+        msg = bot.send_message(uid, f"Send new text for <b>{key}</b>")
+        bot.register_next_step_handler(msg, save_text, key)
 
 # ===== ADMIN FUNCTIONS =====
 def broadcast(msg):
@@ -176,22 +191,24 @@ def broadcast(msg):
             bot.send_message(u, msg.text)
         except:
             pass
-    bot.send_message(msg.chat.id, "✅ Broadcast Done")
 
 def addbal(msg):
     uid, amt = msg.text.split()
     balance[uid] = balance.get(uid, 0) + float(amt)
     save("balance", balance)
-    bot.send_message(msg.chat.id, "✅ Balance Added")
+    bot.send_message(msg.chat.id, "✅ Done")
+
+def save_text(msg, key):
+    texts[key] = msg.text
+    save("texts", texts)
+    bot.send_message(msg.chat.id, f"✅ Updated <b>{key}</b>")
 
 # ===== VERIFY =====
 @app.route("/verify", methods=["POST"])
 def verify():
     data = request.json
     uid = str(data.get("user_id"))
-    device = data.get("device")
-
-    dev = make_hash(device)
+    dev = make_hash(data.get("device"))
     ip = get_ip(request)
 
     if dev in devices or ip in ips:
@@ -207,7 +224,7 @@ def verify():
     save("ips", ips)
     save("users", users)
 
-    bot.send_message(uid, "✅ Verified!", reply_markup=main_menu())
+    bot.send_message(uid, texts["success"], reply_markup=main_menu())
     return jsonify({"status": "success"})
 
 # ===== RUN =====
