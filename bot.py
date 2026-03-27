@@ -3,14 +3,14 @@ from flask_cors import CORS
 from telebot import TeleBot, types
 import hashlib, json, os, threading
 
-# ================= CONFIG =================
+# ===== CONFIG =====
 API_TOKEN = os.environ.get("API_TOKEN")
 DOMAIN = "https://verification-beta-five.vercel.app"
 
-ADMIN_IDS = ["6925391837"]  # CHANGE
+ADMIN_IDS = ["123456789"]
 bot_status = True
 
-# ================= INIT =================
+# ===== INIT =====
 bot = TeleBot(API_TOKEN)
 bot.remove_webhook()
 
@@ -27,13 +27,11 @@ FILES = {
     "gift": "gift.json"
 }
 
-# create files
 for f in FILES.values():
     if not os.path.exists(f):
         with open(f, "w") as file:
             json.dump({}, file)
 
-# load
 devices = json.load(open(FILES["devices"]))
 users = json.load(open(FILES["users"]))
 failed = json.load(open(FILES["failed"]))
@@ -57,12 +55,16 @@ def get_ip(req):
         return req.headers.get("X-Forwarded-For").split(",")[0]
     return req.remote_addr
 
-# ================= START =================
+# ===== USER KEYBOARD =====
+def main_menu():
+    m = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    m.row("💰 Balance", "👥 Refer")
+    m.row("🎁 Redeem Code", "📊 My Info")
+    return m
+
+# ===== START =====
 @bot.message_handler(commands=['start'])
 def start(msg):
-    if not bot_status:
-        return
-
     user_id = str(msg.chat.id)
     args = msg.text.split()
 
@@ -73,122 +75,101 @@ def start(msg):
             refs[user_id] = ref
             refs[ref+"_count"] = refs.get(ref+"_count", 0) + 1
             save("refs", refs)
-            bot.send_message(ref, "🎉 New referral joined!")
+            bot.send_message(ref, "🎉 New referral!")
 
+    # verified
     if user_id in users:
-        bot.send_message(msg.chat.id, "✅ Already Verified")
+        bot.send_message(msg.chat.id, "🏠 Welcome Back!", reply_markup=main_menu())
         return
 
+    # failed
     if user_id in failed:
-        bot.send_message(msg.chat.id, "⚠️ Device/IP used\nYou can still use bot")
+        bot.send_message(msg.chat.id, "⚠️ Already used device/IP\nLimited access", reply_markup=main_menu())
         return
 
+    # new user
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("🔐 Verify", web_app=types.WebAppInfo(DOMAIN)))
 
-    bot.send_message(msg.chat.id, "Verify your device", reply_markup=markup)
+    bot.send_message(msg.chat.id, "🛡 Please verify first", reply_markup=markup)
 
-# ================= REF =================
-@bot.message_handler(commands=['ref'])
-def ref(msg):
-    uid = str(msg.chat.id)
-    count = refs.get(uid+"_count", 0)
-    bot.send_message(uid, f"👥 Referrals: {count}")
+# ===== USER BUTTON HANDLER =====
+@bot.message_handler(func=lambda m: True)
+def user_buttons(msg):
+    user_id = str(msg.chat.id)
+    text = msg.text
 
-# ================= ADMIN PANEL =================
+    if text == "💰 Balance":
+        bal = balance.get(user_id, 0)
+        bot.send_message(user_id, f"💰 Your Balance: ₹{bal}")
+
+    elif text == "👥 Refer":
+        count = refs.get(user_id+"_count", 0)
+        link = f"https://t.me/TesingOnTop_bot?start={user_id}"
+        bot.send_message(user_id, f"👥 Referrals: {count}\n\n🔗 {link}")
+
+    elif text == "🎁 Redeem Code":
+        msg2 = bot.send_message(user_id, "Enter Gift Code:")
+        bot.register_next_step_handler(msg2, redeem_code)
+
+    elif text == "📊 My Info":
+        bot.send_message(user_id, f"🆔 ID: {user_id}")
+
+# ===== REDEEM =====
+def redeem_code(msg):
+    code = msg.text
+    user_id = str(msg.chat.id)
+
+    if code in gift:
+        amount = gift.pop(code)
+        balance[user_id] = balance.get(user_id, 0) + amount
+
+        save("gift", gift)
+        save("balance", balance)
+
+        bot.send_message(user_id, f"✅ Code Redeemed ₹{amount}")
+    else:
+        bot.send_message(user_id, "❌ Invalid Code")
+
+# ===== ADMIN PANEL =====
 @bot.message_handler(commands=['adminpanel'])
 def adminpanel(msg):
     if not is_admin(msg.chat.id):
         return bot.send_message(msg.chat.id, "❌ Denied")
 
-    m = types.InlineKeyboardMarkup(row_width=2)
-    m.add(
-        types.InlineKeyboardButton("👤 Add Admin", callback_data="add_admin"),
-        types.InlineKeyboardButton("❌ Remove Admin", callback_data="remove_admin"),
-        types.InlineKeyboardButton("🤖 Bot ON/OFF", callback_data="bot"),
-        types.InlineKeyboardButton("📢 Broadcast", callback_data="bc"),
-        types.InlineKeyboardButton("💰 Add Balance", callback_data="addbal"),
-        types.InlineKeyboardButton("💸 Remove Balance", callback_data="rembal"),
-        types.InlineKeyboardButton("🎁 Gift Code", callback_data="gift")
-    )
+    m = types.InlineKeyboardMarkup()
+    m.add(types.InlineKeyboardButton("📢 Broadcast", callback_data="bc"))
+    m.add(types.InlineKeyboardButton("💰 Add Balance", callback_data="addbal"))
 
-    bot.send_message(msg.chat.id, "🎛️ Admin Panel", reply_markup=m)
+    bot.send_message(msg.chat.id, "Admin Panel", reply_markup=m)
 
-# ================= CALLBACK =================
 @bot.callback_query_handler(func=lambda call: True)
 def cb(call):
-    uid = str(call.from_user.id)
-
-    if not is_admin(uid):
+    if not is_admin(call.from_user.id):
         return
 
-    if call.data == "bot":
-        global bot_status
-        bot_status = not bot_status
-        bot.send_message(uid, f"Bot {'ON' if bot_status else 'OFF'}")
-
-    elif call.data == "add_admin":
-        msg = bot.send_message(uid, "Send ID")
-        bot.register_next_step_handler(msg, add_admin)
-
-    elif call.data == "remove_admin":
-        msg = bot.send_message(uid, "Send ID")
-        bot.register_next_step_handler(msg, rem_admin)
-
-    elif call.data == "bc":
-        msg = bot.send_message(uid, "Send broadcast msg")
+    if call.data == "bc":
+        msg = bot.send_message(call.message.chat.id, "Send msg")
         bot.register_next_step_handler(msg, broadcast)
 
     elif call.data == "addbal":
-        msg = bot.send_message(uid, "Send: user_id amount")
-        bot.register_next_step_handler(msg, add_balance)
-
-    elif call.data == "rembal":
-        msg = bot.send_message(uid, "Send: user_id amount")
-        bot.register_next_step_handler(msg, rem_balance)
-
-    elif call.data == "gift":
-        msg = bot.send_message(uid, "Send: code amount")
-        bot.register_next_step_handler(msg, create_gift)
-
-# ================= ADMIN ACTIONS =================
-def add_admin(msg):
-    ADMIN_IDS.append(msg.text)
-    bot.send_message(msg.chat.id, "Added")
-
-def rem_admin(msg):
-    if msg.text in ADMIN_IDS:
-        ADMIN_IDS.remove(msg.text)
-    bot.send_message(msg.chat.id, "Removed")
+        msg = bot.send_message(call.message.chat.id, "user_id amount")
+        bot.register_next_step_handler(msg, addbal)
 
 def broadcast(msg):
-    text = msg.text
     for u in users:
         try:
-            bot.send_message(u, text)
+            bot.send_message(u, msg.text)
         except:
             pass
-    bot.send_message(msg.chat.id, "Done")
 
-def add_balance(msg):
+def addbal(msg):
     uid, amt = msg.text.split()
     balance[uid] = balance.get(uid, 0) + float(amt)
     save("balance", balance)
     bot.send_message(msg.chat.id, "Added")
 
-def rem_balance(msg):
-    uid, amt = msg.text.split()
-    balance[uid] = balance.get(uid, 0) - float(amt)
-    save("balance", balance)
-    bot.send_message(msg.chat.id, "Removed")
-
-def create_gift(msg):
-    code, amt = msg.text.split()
-    gift[code] = float(amt)
-    save("gift", gift)
-    bot.send_message(msg.chat.id, f"Gift Created: {code}")
-
-# ================= VERIFY =================
+# ===== VERIFY =====
 @app.route("/verify", methods=["POST"])
 def verify():
     data = request.json
@@ -201,7 +182,6 @@ def verify():
     if dev in devices or ip in ips:
         failed[uid] = True
         save("failed", failed)
-        bot.send_message(uid, "⚠️ Already used")
         return jsonify({"status": "failed"})
 
     devices[dev] = uid
@@ -212,10 +192,10 @@ def verify():
     save("ips", ips)
     save("users", users)
 
-    bot.send_message(uid, "✅ Verified")
+    bot.send_message(uid, "✅ Verified!", reply_markup=main_menu())
     return jsonify({"status": "success"})
 
-# ================= RUN =================
+# ===== RUN =====
 def run():
     bot.infinity_polling()
 
