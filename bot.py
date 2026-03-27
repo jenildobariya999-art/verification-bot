@@ -38,25 +38,41 @@ default_texts = {
     "redeem": "🎁 <b>Enter Gift Code:</b>"
 }
 
+# ===== CREATE FILES =====
 for name, f in FILES.items():
     if not os.path.exists(f):
         with open(f, "w") as file:
             json.dump(default_texts if name == "texts" else {}, file)
 
 # ===== LOAD =====
-devices = json.load(open(FILES["devices"]))
-users = json.load(open(FILES["users"]))
-failed = json.load(open(FILES["failed"]))
-ips = json.load(open(FILES["ips"]))
-refs = json.load(open(FILES["refs"]))
-balance = json.load(open(FILES["balance"]))
-gift = json.load(open(FILES["gift"]))
-texts = json.load(open(FILES["texts"]))
+def load_json(file):
+    try:
+        with open(file) as f:
+            return json.load(f)
+    except:
+        return {}
+
+devices = load_json(FILES["devices"])
+users = load_json(FILES["users"])
+failed = load_json(FILES["failed"])
+ips = load_json(FILES["ips"])
+refs = load_json(FILES["refs"])
+balance = load_json(FILES["balance"])
+gift = load_json(FILES["gift"])
+texts = load_json(FILES["texts"])
+
+# ===== FIX MISSING TEXT KEYS =====
+for k, v in default_texts.items():
+    if k not in texts:
+        texts[k] = v
 
 def save(name, data):
     with open(FILES[name], "w") as f:
         json.dump(data, f)
 
+save("texts", texts)
+
+# ===== HELPERS =====
 def is_admin(uid):
     return str(uid) in ADMIN_IDS
 
@@ -86,6 +102,7 @@ def start(msg):
     uid = str(msg.chat.id)
     args = msg.text.split()
 
+    # referral
     if len(args) > 1:
         ref = args[1]
         if ref != uid and uid not in refs:
@@ -129,8 +146,8 @@ def user_buttons(msg):
 
 # ===== REDEEM =====
 def redeem(msg):
-    code = msg.text
     uid = str(msg.chat.id)
+    code = msg.text
 
     if code in gift:
         amt = gift.pop(code)
@@ -175,7 +192,6 @@ def adminpanel(msg):
 @bot.callback_query_handler(func=lambda call: True)
 def cb(call):
     uid = str(call.from_user.id)
-
     if not is_admin(uid):
         return
 
@@ -191,27 +207,27 @@ def cb(call):
 
     elif data == "add_admin":
         msg = bot.send_message(uid, "Send user ID")
-        bot.register_next_step_handler(msg, add_admin)
+        bot.register_next_step_handler(msg, lambda m: add_admin(m))
 
     elif data == "remove_admin":
         msg = bot.send_message(uid, "Send user ID")
-        bot.register_next_step_handler(msg, remove_admin)
+        bot.register_next_step_handler(msg, lambda m: remove_admin(m))
 
     elif data == "addbal":
         msg = bot.send_message(uid, "user_id amount")
-        bot.register_next_step_handler(msg, addbal)
+        bot.register_next_step_handler(msg, lambda m: addbal(m))
 
     elif data == "rembal":
         msg = bot.send_message(uid, "user_id amount")
-        bot.register_next_step_handler(msg, rembal)
+        bot.register_next_step_handler(msg, lambda m: rembal(m))
 
     elif data == "bc":
         msg = bot.send_message(uid, "Send message")
-        bot.register_next_step_handler(msg, broadcast)
+        bot.register_next_step_handler(msg, lambda m: broadcast(m))
 
     elif data == "gift":
         msg = bot.send_message(uid, "code amount")
-        bot.register_next_step_handler(msg, creategift)
+        bot.register_next_step_handler(msg, lambda m: creategift(m))
 
     elif data == "edit":
         mk = types.InlineKeyboardMarkup()
@@ -222,7 +238,7 @@ def cb(call):
     elif data.startswith("edit_"):
         key = data.replace("edit_", "")
         msg = bot.send_message(uid, f"Send new text for {key}")
-        bot.register_next_step_handler(msg, save_text, key)
+        bot.register_next_step_handler(msg, lambda m: save_text(m, key))
 
 # ===== ADMIN FUNCTIONS =====
 def add_admin(msg):
@@ -257,7 +273,7 @@ def creategift(msg):
     code, amt = msg.text.split()
     gift[code] = float(amt)
     save("gift", gift)
-    bot.send_message(msg.chat.id, f"Gift: {code}")
+    bot.send_message(msg.chat.id, f"Gift Created: {code}")
 
 def save_text(msg, key):
     texts[key] = msg.text
