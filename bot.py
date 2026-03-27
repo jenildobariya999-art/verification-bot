@@ -7,7 +7,7 @@ import hashlib, json, os, threading
 API_TOKEN = os.environ.get("API_TOKEN")
 DOMAIN = "https://verification-beta-five.vercel.app"
 
-ADMIN_IDS = ["123456789"]  # CHANGE
+ADMIN_IDS = ["6925391837"]  # CHANGE
 bot_status = True
 
 # ===== INIT =====
